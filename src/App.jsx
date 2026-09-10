@@ -27,7 +27,7 @@ export default function App() {
       return;
     }
 
-    const res = await fetch('http://localhost:5000/api/users/onboarding', {
+    const res = await fetch('https://letread-backend.onrender.com/api/users/onboarding', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -43,7 +43,7 @@ export default function App() {
 
   // 2. ดึงหนังสือแนะนำ Top-3
   const fetchRecommendations = async (userId) => {
-    const res = await fetch(`http://localhost:5000/api/recommend/${userId}`);
+    const res = await fetch(`https://letread-backend.onrender.com/api/recommend/${userId}`);
     const data = await res.json();
     setRecommendations(data.recommendations || []);
     setCurrentIndex(0);
@@ -54,7 +54,7 @@ export default function App() {
     const currentBook = recommendations[currentIndex];
     if (!currentBook) return;
 
-    const res = await fetch('http://localhost:5000/api/swipe', {
+    const res = await fetch('https://letread-backend.onrender.com/api/swipe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
