@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 
 const ALL_MAINS = [
   'fantasy', 'mystery', 'romance', 'thriller', 'horror', 
@@ -15,12 +15,13 @@ export default function App() {
   const [selectedSubs, setSelectedSubs] = useState([]);
   
   const [recommendations, setRecommendations] = useState([]);
-  const [currentIndex, setCurrentIndex] = useState(0);3
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [sessionId] = useState(crypto.randomUUID());
+  const [isFinished, setIsFinished] = useState(false);
   
   const [stats, setStats] = useState({ likes: 0, totalSwipes: 0, precisionAt3: '0.0' });
 
-  // 1. ฟังก์ชัน Onboarding สร้าผู้ใช้
+  // 1. ฟังก์ชัน Onboarding สร้างผู้ใช้
   const handleOnboarding = async () => {
     if (selectedMains.length === 0 || selectedSubs.length === 0) {
       alert('กรุณาเลือกอย่างน้อย 1 หมวดหลัก และ 1 หมวดย่อย');
@@ -41,12 +42,17 @@ export default function App() {
     fetchRecommendations(data.user.id);
   };
 
-  // 2. ดึงหนังสือแนะนำ Top-3
+  // 2. ดึงหนังสือแนะนำ (ดึงทีละชุด)
   const fetchRecommendations = async (userId) => {
     const res = await fetch(`https://letread-backend.onrender.com/api/recommend/${userId}?sessionId=${sessionId}`);
     const data = await res.json();
-    setRecommendations(data.recommendations || []);
-    setCurrentIndex(0);
+    
+    if (data.recommendations && data.recommendations.length > 0) {
+      setRecommendations(data.recommendations);
+      setCurrentIndex(0);
+    } else {
+      setIsFinished(true); // หมดคลังหนังสือแล้ว
+    }
   };
 
   // 3. บันทึกผล Swipe
@@ -54,6 +60,7 @@ export default function App() {
     const currentBook = recommendations[currentIndex];
     if (!currentBook) return;
 
+    // ยิง Log Swipe
     const res = await fetch('https://letread-backend.onrender.com/api/swipe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -66,7 +73,14 @@ export default function App() {
     });
     const data = await res.json();
     setStats({ likes: data.likes, totalSwipes: data.totalSwipes, precisionAt3: data.precisionAt3 });
-    setCurrentIndex(prev => prev + 1);
+
+    // ตรวจสอบว่าปัดครบชุดปัจจุบันหรือยัง
+    if (currentIndex + 1 < recommendations.length) {
+      setCurrentIndex(prev => prev + 1);
+    } else {
+      // ปัดหมด 3 เล่มในชุดนี้แล้ว ดึงหนังสือชุดถัดไปทันที
+      fetchRecommendations(user.id);
+    }
   };
 
   const toggleSelect = (item, list, setList, max) => {
@@ -131,27 +145,27 @@ export default function App() {
 
   const currentBook = recommendations[currentIndex];
 
-  // หน้าจอ Swipe UI + Precision Dashboard
+  // หน้าจอ Swipe UI
   return (
     <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-4">
-      {/* Precision@3 Dashboard */}
+      {/* Metrics Dashboard */}
       <div className="mb-6 bg-slate-800 p-4 rounded-xl border border-slate-700 flex gap-6 text-center">
         <div>
-          <p className="text-xs text-slate-400">Swiped</p>
-          <p className="text-xl font-bold">{stats.totalSwipes}/3</p>
+          <p className="text-xs text-slate-400">Total Swiped</p>
+          <p className="text-xl font-bold">{stats.totalSwipes}</p>
         </div>
         <div>
           <p className="text-xs text-slate-400">Likes</p>
           <p className="text-xl font-bold text-emerald-400">{stats.likes}</p>
         </div>
         <div>
-          <p className="text-xs text-slate-400">Precision@3</p>
+          <p className="text-xs text-slate-400">Precision Rate</p>
           <p className="text-xl font-bold text-indigo-400">{stats.precisionAt3}%</p>
         </div>
       </div>
 
       {/* Swipe Card UI */}
-      {currentBook ? (
+      {!isFinished && currentBook ? (
         <div className="max-w-sm w-full bg-slate-800 rounded-2xl overflow-hidden shadow-2xl border border-slate-700 flex flex-col">
           <img 
             src={currentBook.cover_url || 'https://via.placeholder.com/400x300'} 
@@ -160,10 +174,17 @@ export default function App() {
           />
           <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
             <div>
-              <span className="text-xs font-semibold px-2.5 py-1 bg-indigo-900/60 text-indigo-300 rounded-md border border-indigo-700">
-                Similarity: {(currentBook.similarity * 100).toFixed(1)}%
-              </span>
-              <h2 className="text-xl font-bold mt-2">{currentBook.title}</h2>
+              <div className="flex gap-2 mb-2">
+                <span className="text-xs font-semibold px-2.5 py-1 bg-indigo-900/60 text-indigo-300 rounded-md border border-indigo-700">
+                  Similarity: {(currentBook.similarity * 100).toFixed(1)}%
+                </span>
+                {currentBook.isExploration && (
+                  <span className="text-xs font-semibold px-2.5 py-1 bg-amber-900/60 text-amber-300 rounded-md border border-amber-700">
+                    🎲 Exploration
+                  </span>
+                )}
+              </div>
+              <h2 className="text-xl font-bold">{currentBook.title}</h2>
               <p className="text-sm text-slate-400 mt-1">
                 {currentBook.main_category} • {currentBook.subcategory}
               </p>
@@ -187,15 +208,15 @@ export default function App() {
         </div>
       ) : (
         <div className="bg-slate-800 p-8 rounded-2xl text-center max-w-sm">
-          <h2 className="text-xl font-bold text-indigo-400 mb-2">ทดสอบครบ 3 เล่มแล้ว!</h2>
+          <h2 className="text-xl font-bold text-indigo-400 mb-2">ปัดครบทุกเล่มในระบบแล้ว!</h2>
           <p className="text-sm text-slate-300 mb-4">
-            ผลคะแนน Precision@3 ของ Session นี้เท่ากับ <span className="font-bold text-emerald-400">{stats.precisionAt3}%</span>
+            คุณปัดหนังสือไปทั้งหมด {stats.totalSwipes} เล่ม (อัตราความชอบ {stats.precisionAt3}%)
           </p>
           <button
             onClick={() => window.location.reload()}
-            className="px-6 py-2 bg-indigo-500 rounded-lg text-sm font-semibold"
+            className="px-6 py-2 bg-indigo-500 rounded-lg text-sm font-semibold hover:bg-indigo-600"
           >
-            เริ่มทดสอบใหม่
+            เริ่มทดสอบ Session ใหม่
           </button>
         </div>
       )}
