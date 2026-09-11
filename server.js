@@ -23,20 +23,17 @@ const ALL_SUBS = [
   'Historical', 'School/Campus', 'Dark/Tragedy', 'Action/Adventure', 'Sci-Fi/Futuristic'
 ];
 
-// Helper: แปลงชนิดข้อมูล Vector ให้เป็น Array ของ Number
 function parseVector(vec) {
   if (typeof vec === 'string') return JSON.parse(vec);
   return vec || Array(15).fill(0);
 }
 
-// Helper: ทำ L2 Normalization ป้องกันค่าใน Vector สูงเกินไป
 function normalizeL2(vec) {
   const norm = Math.sqrt(vec.reduce((sum, val) => sum + val * val, 0));
   if (norm === 0) return vec;
   return vec.map(val => val / norm);
 }
 
-// ฟังก์ชันสร้าง Vector (15 มิติ)
 function generateVector(selectedMains = [], selectedSubs = []) {
   const wMain = selectedMains.length > 0 ? 0.6 / selectedMains.length : 0;
   const wSub = selectedSubs.length > 0 ? 0.4 / selectedSubs.length : 0;
@@ -48,7 +45,6 @@ function generateVector(selectedMains = [], selectedSubs = []) {
   return JSON.stringify(normalizeL2(rawVector));
 }
 
-// ฟังก์ชัน Cosine Similarity
 function calculateCosineSimilarity(vecA, vecB) {
   const a = parseVector(vecA);
   const b = parseVector(vecB);
@@ -65,7 +61,7 @@ function calculateCosineSimilarity(vecA, vecB) {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-// 1. Endpoint สร้าง User (Onboarding)
+// 1. Endpoint Onboarding
 app.post('/api/users/onboarding', async (req, res) => {
   try {
     const { username, selectedMains, selectedSubs } = req.body;
@@ -84,15 +80,13 @@ app.post('/api/users/onboarding', async (req, res) => {
   }
 });
 
-// 2. Endpoint ดึงหนังสือแนะนำ Top 3 (ผสมผสาน e-greedy Exploration)
-// 2. Endpoint ดึงหนังสือแนะนำ (กรองเล่มที่เคย Swipe ไปแล้วออก)
+// 2. Endpoint Recomendations
 app.get('/api/recommend/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    const { sessionId } = req.query; // รับ sessionId จาก Query Param
-    const epsilon = 0.2; // อัตรา Exploration 20%
+    const { sessionId } = req.query;
+    const epsilon = 0.2;
 
-    // 1. ดึงข้อมูล User
     const { data: user, error: uErr } = await supabase
       .from('users')
       .select('*')
@@ -101,7 +95,6 @@ app.get('/api/recommend/:userId', async (req, res) => {
 
     if (uErr || !user) return res.status(404).json({ error: 'User not found' });
 
-    // 2. ดึง ID ของหนังสือที่เคยปัดไปแล้วใน Session นี้
     let swipedBookIds = [];
     if (sessionId) {
       const { data: logs } = await supabase
@@ -110,23 +103,18 @@ app.get('/api/recommend/:userId', async (req, res) => {
         .eq('user_id', userId)
         .eq('session_id', sessionId);
       
-      if (logs) {
-        swipedBookIds = logs.map(l => l.book_id);
-      }
+      if (logs) swipedBookIds = logs.map(l => l.book_id);
     }
 
-    // 3. ดึงหนังสือทั้งหมด แล้วกรองเล่มที่เคยปัดออก
     const { data: books, error: bErr } = await supabase.from('books').select('*');
     if (bErr) throw bErr;
 
     const unswipedBooks = books.filter(b => !swipedBookIds.includes(b.id));
 
-    // ถ้าปัดครบหมดตระกูลแล้ว ให้ส่งการ์ดแจ้งเตือนว่าหมดแล้ว
     if (unswipedBooks.length === 0) {
-      return res.json({ recommendations: [], message: 'หมดแล้วครับ! คุณปัดหนังสือครบทุกเล่มในคลังแล้ว' });
+      return res.json({ recommendations: [], message: 'หมดแล้วครับ!' });
     }
 
-    // 4. คำนวณ Cosine Similarity เฉพาะเล่มที่ยังไม่เคยปัด
     const scoredBooks = unswipedBooks.map(book => {
       const sim = calculateCosineSimilarity(user.preference_vector, book.feature_vector);
       return { ...book, similarity: isNaN(sim) ? 0 : sim };
@@ -135,13 +123,10 @@ app.get('/api/recommend/:userId', async (req, res) => {
     scoredBooks.sort((a, b) => b.similarity - a.similarity);
 
     let finalRecommendations = [];
-
-    // 5. เลือกจัดชุดแนะนำ (e-greedy)
     if (Math.random() < epsilon && scoredBooks.length > 3) {
       const top2 = scoredBooks.slice(0, 2);
       const remainingBooks = scoredBooks.slice(2);
       const randomBook = remainingBooks[Math.floor(Math.random() * remainingBooks.length)];
-      
       finalRecommendations = [...top2, { ...randomBook, isExploration: true }];
     } else {
       finalRecommendations = scoredBooks.slice(0, 3);
@@ -153,17 +138,15 @@ app.get('/api/recommend/:userId', async (req, res) => {
   }
 });
 
-// 3. Endpoint บันทึก Swipe + ปรับ Preference Vector แบบ Dynamic (Relevance Feedback)
+// 3. Endpoint Swipe
 app.post('/api/swipe', async (req, res) => {
   try {
     const { userId, bookId, action, sessionId } = req.body;
 
-    // บันทึก Log
     await supabase.from('swipe_logs').insert([
       { user_id: userId, book_id: bookId, action, session_id: sessionId }
     ]);
 
-    // หากกด LIKE ให้ทำ Relevance Feedback อัปเดต Preference Vector ของ User
     if (action === 'LIKE') {
       const { data: user } = await supabase.from('users').select('preference_vector').eq('id', userId).single();
       const { data: book } = await supabase.from('books').select('feature_vector').eq('id', bookId).single();
@@ -171,15 +154,11 @@ app.post('/api/swipe', async (req, res) => {
       if (user && book) {
         const uVec = parseVector(user.preference_vector);
         const bVec = parseVector(book.feature_vector);
-        const learningRate = 0.15; // ปรับค่าน้ำหนักตาม Feedback
+        const learningRate = 0.15;
 
-        // ปรับ Vector: User Vector + (LearningRate * Book Vector)
         const updatedVec = uVec.map((val, idx) => val + learningRate * (bVec[idx] || 0));
-        
-        // Normalize ด้วย L2
         const normalizedVec = normalizeL2(updatedVec);
 
-        // อัปเดตกลับลง Supabase
         await supabase
           .from('users')
           .update({ preference_vector: JSON.stringify(normalizedVec) })
@@ -187,7 +166,6 @@ app.post('/api/swipe', async (req, res) => {
       }
     }
 
-    // คำนวณ Metric Precision@3
     const { data: logs } = await supabase
       .from('swipe_logs')
       .select('*')
@@ -199,6 +177,41 @@ app.post('/api/swipe', async (req, res) => {
     const precisionAt3 = totalSwipes > 0 ? ((likes / totalSwipes) * 100).toFixed(1) : '0.0';
 
     res.json({ likes, totalSwipes, precisionAt3 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Endpoint สรุปผลการแนะนำ (Summary)
+app.get('/api/summary/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const { data: books } = await supabase.from('books').select('*');
+
+    const scoredBooks = books.map(book => {
+      const sim = calculateCosineSimilarity(user.preference_vector, book.feature_vector);
+      return { ...book, similarity: isNaN(sim) ? 0 : sim };
+    });
+
+    scoredBooks.sort((a, b) => b.similarity - a.similarity);
+
+    const top3Matched = scoredBooks.slice(0, 3);
+    const remainingBooks = scoredBooks.slice(3);
+    const discoveredBook = remainingBooks.find(b => b.similarity > 0) || remainingBooks[0];
+
+    res.json({
+      top3Matched,
+      discoveredBook
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
