@@ -43,7 +43,7 @@ export default function App() {
 
   // 2. ดึงหนังสือแนะนำ Top-3
   const fetchRecommendations = async (userId) => {
-    const res = await fetch(`https://letread-backend.onrender.com/api/recommend/${userId}`);
+    const res = await fetch(`https://letread-backend.onrender.com/api/recommend/${userId}?sessionId=${sessionId}`);
     const data = await res.json();
     setRecommendations(data.recommendations || []);
     setCurrentIndex(0);

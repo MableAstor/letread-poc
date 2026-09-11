@@ -85,11 +85,14 @@ app.post('/api/users/onboarding', async (req, res) => {
 });
 
 // 2. Endpoint ดึงหนังสือแนะนำ Top 3 (ผสมผสาน e-greedy Exploration)
+// 2. Endpoint ดึงหนังสือแนะนำ (กรองเล่มที่เคย Swipe ไปแล้วออก)
 app.get('/api/recommend/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
+    const { sessionId } = req.query; // รับ sessionId จาก Query Param
     const epsilon = 0.2; // อัตรา Exploration 20%
 
+    // 1. ดึงข้อมูล User
     const { data: user, error: uErr } = await supabase
       .from('users')
       .select('*')
@@ -98,30 +101,49 @@ app.get('/api/recommend/:userId', async (req, res) => {
 
     if (uErr || !user) return res.status(404).json({ error: 'User not found' });
 
+    // 2. ดึง ID ของหนังสือที่เคยปัดไปแล้วใน Session นี้
+    let swipedBookIds = [];
+    if (sessionId) {
+      const { data: logs } = await supabase
+        .from('swipe_logs')
+        .select('book_id')
+        .eq('user_id', userId)
+        .eq('session_id', sessionId);
+      
+      if (logs) {
+        swipedBookIds = logs.map(l => l.book_id);
+      }
+    }
+
+    // 3. ดึงหนังสือทั้งหมด แล้วกรองเล่มที่เคยปัดออก
     const { data: books, error: bErr } = await supabase.from('books').select('*');
     if (bErr) throw bErr;
 
-    // คำนวณ Cosine Similarity สำหรับเล่มทั้งหมด
-    const scoredBooks = books.map(book => {
+    const unswipedBooks = books.filter(b => !swipedBookIds.includes(b.id));
+
+    // ถ้าปัดครบหมดตระกูลแล้ว ให้ส่งการ์ดแจ้งเตือนว่าหมดแล้ว
+    if (unswipedBooks.length === 0) {
+      return res.json({ recommendations: [], message: 'หมดแล้วครับ! คุณปัดหนังสือครบทุกเล่มในคลังแล้ว' });
+    }
+
+    // 4. คำนวณ Cosine Similarity เฉพาะเล่มที่ยังไม่เคยปัด
+    const scoredBooks = unswipedBooks.map(book => {
       const sim = calculateCosineSimilarity(user.preference_vector, book.feature_vector);
       return { ...book, similarity: isNaN(sim) ? 0 : sim };
     });
 
-    // เรียงจาก Similarity สูงไปต่ำ (Exploitation)
     scoredBooks.sort((a, b) => b.similarity - a.similarity);
 
     let finalRecommendations = [];
 
-    // ตัดสินใจเลือกแนวทาง e-greedy
+    // 5. เลือกจัดชุดแนะนำ (e-greedy)
     if (Math.random() < epsilon && scoredBooks.length > 3) {
-      // Exploration: สุ่มสอดแทรกหนังสือขอบนอกเข้ามา 1 เล่ม
       const top2 = scoredBooks.slice(0, 2);
       const remainingBooks = scoredBooks.slice(2);
       const randomBook = remainingBooks[Math.floor(Math.random() * remainingBooks.length)];
       
       finalRecommendations = [...top2, { ...randomBook, isExploration: true }];
     } else {
-      // Exploitation: เลือก Top 3 ที่ตรงที่สุด
       finalRecommendations = scoredBooks.slice(0, 3);
     }
 
